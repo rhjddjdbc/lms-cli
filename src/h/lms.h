@@ -1,0 +1,29 @@
+#ifndef LMS_H
+#define LMS_H
+
+#include <stdint.h>
+#include "lm_ots.h"
+
+#define LMS_HEIGHT 10
+#define LMS_LEAVES 1024
+
+// SIG_BYTES = 4 (q) + OTS_SIG (4+N+P*N) + 4 (padding) + LMS_HEIGHT * N (auth path)
+#define SIG_BYTES (4 + 4 + (4 + N + P*N) + LMS_HEIGHT * N)   // 4(LMS) + 4(q) + OTS + path
+
+int lms_keygen(const uint8_t I[16], uint8_t seed[32],
+               uint8_t pub[20 + N],
+               uint8_t tree[2*LMS_LEAVES][N]);
+
+int lms_sign(const uint8_t I[16], uint32_t q, const uint8_t seed[32],
+             const uint8_t tree[2*LMS_LEAVES][N],
+             const uint8_t *msg, size_t msglen,
+             uint8_t sig[SIG_BYTES]);
+
+int lms_verify(const uint8_t pub[20 + N],
+               const uint8_t *msg, size_t msglen,
+               const uint8_t sig[SIG_BYTES]);
+
+void lms_build_tree(const uint8_t I[16], uint8_t seed[32],
+                    uint8_t tree[2*LMS_LEAVES][N]);
+
+#endif
