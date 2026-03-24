@@ -37,23 +37,33 @@ int bundle_read(const char *filename, LMS_Bundle *b) {
 
     size_t pos = 0;
     if (memcmp(data + pos, BUNDLE_MAGIC, BUNDLE_MAGIC_LEN) != 0) goto error;
-    pos += BUNDLE_MAGIC_LEN + 4; 
+    pos += BUNDLE_MAGIC_LEN + 4;                    // skip magic + version
 
     memcpy(b->I, data + pos, 16); pos += 16;
     b->next_q = bytes_to_u32(data + pos); pos += 4;
     memcpy(b->pub, data + pos, 20 + N); pos += 20 + N;
 
-    b->has_seed = data[pos++]; 
-    if (b->has_seed) { memcpy(b->seed, data + pos, 32); pos += 32; }
+    b->has_seed = data[pos++];
+    if (b->has_seed) {
+        if (pos + 32 > len) goto error;
+        memcpy(b->seed, data + pos, 32); pos += 32;
+    }
 
-    b->has_tree = data[pos++];                   
-    if (b->has_tree) { memcpy(b->tree, data + pos, 2*LMS_LEAVES*N); pos += 2*LMS_LEAVES*N; }
+    b->has_tree = data[pos++];
+    if (b->has_tree) {
+        if (pos + 2*LMS_LEAVES*N > len) goto error;
+        memcpy(b->tree, data + pos, 2*LMS_LEAVES*N); pos += 2*LMS_LEAVES*N;
+    }
 
     b->has_last_sig = data[pos++];
-    if (b->has_last_sig) memcpy(b->last_sig, data + pos, SIG_BYTES);
+    if (b->has_last_sig) {
+        if (pos + SIG_BYTES > len) goto error;      
+	memcpy(b->last_sig, data + pos, SIG_BYTES);
+    }
 
     free(data);
     return 0;
+
 error:
     free(data);
     return -3;
