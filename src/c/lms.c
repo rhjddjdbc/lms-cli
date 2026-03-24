@@ -75,7 +75,6 @@ static void hash_internal(const uint8_t I[16], uint32_t node,
     sha256_final(&ctx, out);
 }
 
-// ===== FIXED TREE =====
 void lms_build_tree(const uint8_t I[16], uint8_t seed[32],
                     uint8_t tree[2*LMS_LEAVES][N]) {
 
@@ -118,18 +117,21 @@ static int constant_time_memcmp(const uint8_t *a, const uint8_t *b, size_t len) 
 int lms_sign(const uint8_t I[16], uint32_t q, const uint8_t seed[N],
              const uint8_t tree[2*LMS_LEAVES][N],
              const uint8_t *msg, size_t msglen,
-             uint8_t sig[SIG_BYTES]) {   // SIG_BYTES now 1456
+             uint8_t sig[SIG_BYTES])
+{
     uint8_t ots[4 + N + P * N];
     if (lmots_sign(I, q, seed, msg, msglen, ots) != 0)
         return -1;
 
-    // RFC format: LMS typecode || q || OTS_sig || auth path
-    u32_to_bytes(0x00000006, sig);                  // LMS_SHA256_M32_H10
-    u32_to_bytes(q, sig + 4);
-    memcpy(sig + 8, ots, sizeof(ots));
+    // RFC 8554 format: LMS type || LMOTS type || q || OTS signature || auth path
+    u32_to_bytes(0x00000006, sig);      // LMS_SHA256_M32_H10
+    u32_to_bytes(0x00000004, sig + 4);  // LMOTS_SHA256_N32_W8
+    u32_to_bytes(q, sig + 8);
+    memcpy(sig + 12, ots, sizeof(ots));
 
-    uint8_t *path = sig + 8 + sizeof(ots);
+    uint8_t *path = sig + 12 + sizeof(ots);
     int node = LMS_LEAVES + q;
+
     for (int i = 0; i < LMS_HEIGHT; i++) {
         int sibling = node ^ 1;
         memcpy(path + i * N, tree[sibling], N);
@@ -140,16 +142,21 @@ int lms_sign(const uint8_t I[16], uint32_t q, const uint8_t seed[N],
 
 int lms_verify(const uint8_t pub[20 + N],
                const uint8_t *msg, size_t msglen,
-               const uint8_t sig[SIG_BYTES]) {
-    if (bytes_to_u32(sig) != 0x00000006) {  // must be LMS_SHA256_M32_H10
+               const uint8_t sig[SIG_BYTES])
+{
+    // Check LMS algorithm type
+    if (bytes_to_u32(sig) != 0x00000006)      // LMS_SHA256_M32_H10
         return -1;
-    }
 
-    uint32_t q = bytes_to_u32(sig + 4);
+    // Check LM-OTS algorithm type
+    if (bytes_to_u32(sig + 4) != 0x00000004)  // LMOTS_SHA256_N32_W8
+        return -1;
+
+    uint32_t q = bytes_to_u32(sig + 8);
     if (q >= LMS_LEAVES) return -1;
 
-    const uint8_t *ots_sig = sig + 8;
-    const uint8_t *path = sig + 8 + (4 + N + P * N);
+    const uint8_t *ots_sig = sig + 12;
+    const uint8_t *path    = sig + 12 + (4 + N + P * N);
 
     uint8_t I[16];
     memcpy(I, pub + 4, 16);
@@ -165,14 +172,16 @@ int lms_verify(const uint8_t pub[20 + N],
     for (int i = 0; i < LMS_HEIGHT; i++) {
         uint8_t tmp[N];
         const uint8_t *sib = path + i * N;
+
         if (node % 2 == 0)
             hash_internal(I, node >> 1, current, sib, tmp);
         else
             hash_internal(I, node >> 1, sib, current, tmp);
+
         memcpy(current, tmp, N);
         node >>= 1;
     }
 
-    // Constant-time compare root
+    // Constant-time compare
     return (constant_time_memcmp(current, pub + 20, N) == 0) ? 0 : -1;
 }
