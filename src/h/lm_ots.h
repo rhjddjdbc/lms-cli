@@ -1,6 +1,5 @@
 #ifndef LM_OTS_H
 #define LM_OTS_H
-
 #include <stdint.h>
 #include <stddef.h>
 
@@ -14,11 +13,12 @@
 #define D_LEAF 0x8283
 #define D_INTR 0x8383
 
+
 int lmots_sign(const uint8_t I[16], uint32_t q, const uint8_t secret[N],
-               const uint8_t *msg, size_t msglen, uint8_t sig[4 + N + P*N]);
+               const uint8_t *msg, size_t msglen, uint8_t sig[N + P*N]);
 
 int lmots_reconstruct_pub(const uint8_t I[16], uint32_t q,
-                          const uint8_t *ots_sig,
+                          const uint8_t *ots_sig,  
                           const uint8_t *msg, size_t msglen,
                           uint8_t pubhash[N]);
 
