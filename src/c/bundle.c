@@ -36,29 +36,43 @@ int bundle_read(const char *filename, LMS_Bundle *b) {
     if (read_file(filename, &data, &len) != 0) return -1;
 
     size_t pos = 0;
-    if (memcmp(data + pos, BUNDLE_MAGIC, BUNDLE_MAGIC_LEN) != 0) goto error;
-    pos += BUNDLE_MAGIC_LEN + 4;                    // skip magic + version
+    if (pos + BUNDLE_MAGIC_LEN > len || memcmp(data + pos, BUNDLE_MAGIC, BUNDLE_MAGIC_LEN) != 0) goto error;
+    pos += BUNDLE_MAGIC_LEN;
 
+    if (pos + 4 > len) goto error;   // version
+    pos += 4;
+
+    if (pos + 16 > len) goto error;
     memcpy(b->I, data + pos, 16); pos += 16;
+
+    if (pos + 4 > len) goto error;
     b->next_q = bytes_to_u32(data + pos); pos += 4;
+
+    if (pos + 20 + N > len) goto error;
     memcpy(b->pub, data + pos, 20 + N); pos += 20 + N;
 
+    if (pos >= len) goto error;
     b->has_seed = data[pos++];
+
     if (b->has_seed) {
         if (pos + 32 > len) goto error;
         memcpy(b->seed, data + pos, 32); pos += 32;
     }
 
+    if (pos >= len) goto error;
     b->has_tree = data[pos++];
+
     if (b->has_tree) {
         if (pos + 2*LMS_LEAVES*N > len) goto error;
         memcpy(b->tree, data + pos, 2*LMS_LEAVES*N); pos += 2*LMS_LEAVES*N;
     }
 
+    if (pos >= len) goto error;
     b->has_last_sig = data[pos++];
+
     if (b->has_last_sig) {
-        if (pos + SIG_BYTES > len) goto error;      
-	memcpy(b->last_sig, data + pos, SIG_BYTES);
+        if (pos + SIG_BYTES > len) goto error;
+        memcpy(b->last_sig, data + pos, SIG_BYTES);
     }
 
     free(data);
