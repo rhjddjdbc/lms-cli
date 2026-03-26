@@ -19,25 +19,20 @@ static void derive_secret_i(const uint8_t seed[N], uint32_t q, uint16_t i, uint8
 static void compute_ots_pub(const uint8_t I[16], uint32_t q,
                             const uint8_t seed[N], uint8_t K[N]) {
     uint8_t z[P][N];
-
     for (uint16_t i = 0; i < P; i++) {
         uint8_t x_i[N];
         derive_secret_i(seed, q, i, x_i);
         lmots_chain(z[i], x_i, 0, 255, I, q, i);
     }
-
     SHA256_CTX ctx;
     sha256_init(&ctx);
-
     uint8_t pre[22];
     memcpy(pre, I, 16);
     u32_to_bytes(q, pre + 16);
     u16_to_bytes(D_PBLC, pre + 20);
-
     sha256_update(&ctx, pre, 22);
     for (int i = 0; i < P; i++)
         sha256_update(&ctx, z[i], N);
-
     sha256_final(&ctx, K);
 }
 
@@ -45,15 +40,12 @@ static void hash_leaf(const uint8_t I[16], uint32_t node,
                       const uint8_t K[N], uint8_t out[N]) {
     SHA256_CTX ctx;
     sha256_init(&ctx);
-
-    uint8_t pre[16 + 4 + 2];
+    uint8_t pre[22];                    // 16 + 4 + 2
     memcpy(pre, I, 16);
     u32_to_bytes(node, pre + 16);
     u16_to_bytes(D_LEAF, pre + 20);
-
-    sha256_update(&ctx, pre, sizeof(pre));
+    sha256_update(&ctx, pre, 22);
     sha256_update(&ctx, K, N);
-
     sha256_final(&ctx, out);
 }
 
@@ -62,31 +54,26 @@ static void hash_internal(const uint8_t I[16], uint32_t node,
                           uint8_t out[N]) {
     SHA256_CTX ctx;
     sha256_init(&ctx);
-
-    uint8_t pre[16 + 4 + 2];
+    uint8_t pre[22];
     memcpy(pre, I, 16);
     u32_to_bytes(node, pre + 16);
     u16_to_bytes(D_INTR, pre + 20);
-
-    sha256_update(&ctx, pre, sizeof(pre));
+    sha256_update(&ctx, pre, 22);
     sha256_update(&ctx, left, N);
     sha256_update(&ctx, right, N);
-
     sha256_final(&ctx, out);
 }
 
+// Build the full LMS tree
 void lms_build_tree(const uint8_t I[16], uint8_t seed[32],
                     uint8_t tree[2*LMS_LEAVES][N]) {
-
     // Leaves
     for (int q = 0; q < LMS_LEAVES; q++) {
         uint8_t K[N];
         compute_ots_pub(I, (uint32_t)q, seed, K);
-
         uint32_t node = LMS_LEAVES + q;
         hash_leaf(I, node, K, tree[node]);
     }
-
     // Internal nodes
     for (int i = LMS_LEAVES - 1; i >= 1; i--) {
         hash_internal(I, i, tree[2*i], tree[2*i + 1], tree[i]);
@@ -97,11 +84,9 @@ int lms_keygen(const uint8_t I[16], uint8_t seed[32],
                uint8_t pub[20 + N],
                uint8_t tree[2*LMS_LEAVES][N]) {
     lms_build_tree(I, seed, tree);
-
-    u32_to_bytes(0x00000006, pub);
+    u32_to_bytes(0x00000006, pub);        // LMS_SHA256_M32_H10
     memcpy(pub + 4, I, 16);
     memcpy(pub + 20, tree[1], N);
-
     return 0;
 }
 
@@ -111,7 +96,7 @@ static int constant_time_memcmp(const uint8_t *a, const uint8_t *b, size_t len) 
     for (size_t i = 0; i < len; i++) {
         diff |= a[i] ^ b[i];
     }
-    return diff;  // 0 only if equal
+    return diff; // 0 only if equal
 }
 
 int lms_sign(const uint8_t I[16], uint32_t q, const uint8_t seed[N],
@@ -119,17 +104,20 @@ int lms_sign(const uint8_t I[16], uint32_t q, const uint8_t seed[N],
              const uint8_t *msg, size_t msglen,
              uint8_t sig[SIG_BYTES])
 {
-    uint8_t ots[4 + N + P * N];
+    uint8_t ots[N + P * N];                     // 32 + 34*32 = 1120 Bytes
+
     if (lmots_sign(I, q, seed, msg, msglen, ots) != 0)
         return -1;
 
-    // RFC 8554 format: LMS type || LMOTS type || q || OTS signature || auth path
+    // RFC 8554 LMS signature format:
+    // LMS type (4) || LMOTS type (4) || q (4) || LM-OTS signature || auth path
     u32_to_bytes(0x00000006, sig);      // LMS_SHA256_M32_H10
     u32_to_bytes(0x00000004, sig + 4);  // LMOTS_SHA256_N32_W8
     u32_to_bytes(q, sig + 8);
-    memcpy(sig + 12, ots, sizeof(ots));
 
-    uint8_t *path = sig + 12 + sizeof(ots);
+    memcpy(sig + 12, ots, N + P * N);
+
+    uint8_t *path = sig + 12 + (N + P * N);
     int node = LMS_LEAVES + q;
 
     for (int i = 0; i < LMS_HEIGHT; i++) {
@@ -156,7 +144,7 @@ int lms_verify(const uint8_t pub[20 + N],
     if (q >= LMS_LEAVES) return -1;
 
     const uint8_t *ots_sig = sig + 12;
-    const uint8_t *path    = sig + 12 + (4 + N + P * N);
+    const uint8_t *path    = sig + 12 + (N + P * N);
 
     uint8_t I[16];
     memcpy(I, pub + 4, 16);
@@ -165,10 +153,12 @@ int lms_verify(const uint8_t pub[20 + N],
     if (lmots_reconstruct_pub(I, q, ots_sig, msg, msglen, K_ots) != 0)
         return -1;
 
+    // Rebuild leaf
     uint32_t node = LMS_LEAVES + q;
     uint8_t current[N];
     hash_leaf(I, node, K_ots, current);
 
+    // Walk up the Merkle tree using authentication path
     for (int i = 0; i < LMS_HEIGHT; i++) {
         uint8_t tmp[N];
         const uint8_t *sib = path + i * N;
@@ -182,6 +172,6 @@ int lms_verify(const uint8_t pub[20 + N],
         node >>= 1;
     }
 
-    // Constant-time compare
+    // Constant-time compare with public key root
     return (constant_time_memcmp(current, pub + 20, N) == 0) ? 0 : -1;
 }
